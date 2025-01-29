@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Stream</title>
+    <style>
+        :root {
+            --primary: #2d3436;
+            --secondary: #0984e3;
+            --bg: #f5f6fa;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 400px;
+        }
+
+        .message {
+            margin: 15px 0;
+            padding: 12px 18px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .user-message {
+            background: var(--primary);
+            color: white;
+            margin-left: auto;
+        }
+
+        .ai-message {
+            background: var(--bg);
+            border: 1px solid #ddd;
+        }
+
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: var(--secondary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            color: #666;
+            font-style: italic;
+            padding: 10px;
+        }
+
+        pre {
+            background: #2d3436;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        code {
+            font-family: 'Courier New', Courier, monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Chat Stream</h1>
+        <div class="chat-container" id="chatContainer"></div>
+        <div class="input-container">
+            <input type="text" id="promptInput" placeholder="Ask me anything...">
+            <button onclick="handleSubmit()" id="submitBtn">Send</button>
+        </div>
+        <div id="loading" class="loading">Generating response...</div>
+    </div>
+
+    <!-- Marked.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <script>
+        let controller = null;
+
+        // Configure Marked.js to use Highlight.js for code blocks
+        marked.setOptions({
+            highlight: function (code, language) {
+                const validLanguage = hljs.getLanguage(language) ? language : 'plaintext';
+                return hljs.highlight(code, { language: validLanguage }).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+
+        async function handleSubmit() {
+            const prompt = document.getElementById('promptInput').value.trim();
+            const chatContainer = document.getElementById('chatContainer');
+            const loading = document.getElementById('loading');
+            const submitBtn = document.getElementById('submitBtn');
+
+            if (!prompt) return;
+
+            // Add user message
+            addMessage(prompt, 'user');
+            document.getElementById('promptInput').value = '';
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+                controller = new AbortController();
+                const response = await fetch('/ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt }),
+                    signal: controller.signal
+                });
+
+                // Create AI message element
+                const aiMessage = addMessage('', 'ai');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let done = false;
+
+                while (!done) {
+                    const { value, done: streamDone } = await reader.read();
+                    done = streamDone;
+                    const chunk = decoder.decode(value || new Uint8Array(), { stream: !done });
+                    
+                    // Append chunk to AI message
+                    aiMessage.innerHTML += marked.parse(chunk);
+                    
+                    // Highlight code blocks
+                    document.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightBlock(block);
+                    });
+
+                    // Auto-scroll to bottom
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    addMessage('Error generating response. Please try again.', 'ai');
+                }
+            } finally {
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
+                controller = null;
+            }
+        }
+
+        function addMessage(content, type) {
+            const container = document.getElementById('chatContainer');
+            const message = document.createElement('div');
+            message.className = `message ${type}-message`;
+
+            if (type === 'user') {
+                message.textContent = content; // Plain text for user messages
+            } else {
+                message.innerHTML = marked.parse(content); // Render Markdown for AI messages
+            }
+
+            container.appendChild(message);
+            return message;
+        }
+
+        // Handle Enter key
+        document.getElementById('promptInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleSubmit();
+        });
+    </script>
+</body>
+</html>
